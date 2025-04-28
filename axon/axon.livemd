@@ -1,0 +1,128 @@
+# Elixir NX
+
+```elixir
+Mix.install([
+  {:nx, "~> 0.9.2"},
+  {:exla, "~> 0.9.2"},
+  {:axon, "~> 0.7.0"},
+  {:kino, "~> 0.15.3"}
+])
+```
+
+## 简单的模型
+
+定义输入层
+
+```elixir
+input = Axon.input("data")
+```
+
+```elixir
+template = Nx.template({2, 8}, :f32)
+Axon.Display.as_graph(input, template)
+```
+
+定义模型，模型包括输入，中间层（dense），激活函数，结果层，损失函数
+
+```elixir
+model =
+  Axon.input("data")
+  # |> Axon.dense(32, activation: :relu)
+  |> Axon.activation(:relu)
+  |> Axon.dropout(rate: 0.5)
+  |> Axon.dense(1)
+  |> Axon.activation(:softmax)
+
+template = Nx.template({2, 16}, :f32)
+Axon.Display.as_graph(model, template)
+```
+
+```elixir
+{init_fn, predict_fn} = Axon.build(model)
+```
+
+```elixir
+params = init_fn.(template, %{})
+```
+
+```elixir
+
+```
+
+## Pure Axon model
+
+```elixir
+model = 
+  Axon.input("input")
+|> Axon.dense(32)
+|> Axon.activation(:relu)
+|> Axon.dropout(rate: 0.5)
+|> Axon.dense(1)
+|> Axon.activation(:softmax)
+```
+
+```elixir
+{init_fn, predict_fn}=
+  Axon.build(model, debug: true, print_values: true)
+```
+
+```elixir
+  params = init_fn.(Nx.template({2,16}, :f32), %{})
+```
+
+```elixir
+predict_fn.(params, Nx.iota({2,16}, type: :f32))
+```
+
+## 观察梯度消失
+
+```elixir
+input = Axon.input("input")
+```
+
+
+
+<!-- livebook:{"break_markdown":true} -->
+
+Display.as_graph的格式是operation_layer, dense_0代表layer0的dense，sigmoid_0代表layer0的sigmoid，这样我们就可以知道layer0执行了什么操作，但是在定义的时候，我们只调用了一次Axon.dense(input, 20, activation: :sigmoid)
+
+```elixir
+# 10 layer, dense 20,  activation is sigmod
+defmodule Tidu do
+  def layer(input, 1) do
+    Axon.dense(input, 20, activation: :sigmoid)
+  end
+  def layer(input, n_layer) do
+    layer(Axon.dense(input, 20, activation: :sigmoid), n_layer-1)
+  end
+end
+
+model = Tidu.layer(input, 10)
+template = Nx.template({2, 20}, :f32)
+Axon.Display.as_graph(model, template)
+```
+
+```elixir
+loop = Axon.Loop.trainer(model, :mean_squared_error, :sgd)
+```
+
+```elixir
+train_data =
+  Stream.repeatedly(fn ->
+    {xs, _next_key} =
+      :random.uniform(9999)
+      |> Nx.Random.key()
+      |> Nx.Random.normal(shape: {8, 1})
+
+    ys = Nx.sin(xs)
+    {xs, ys}
+  end)
+```
+
+```elixir
+Enum.take(train_data,2)
+```
+
+```elixir
+Axon.Loop.run(loop, train_data, %{}, epochs: 2, iterations: 2, debug: true)
+```
