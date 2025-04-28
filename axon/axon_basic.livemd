@@ -1,0 +1,623 @@
+<!-- livebook:{"persist_outputs":true} -->
+
+# batch_size, iteration, epics的关系
+
+```elixir
+Mix.install([
+  {:axon, "~> 0.7.0"},
+  {:kino, "~> 0.15.3"}
+])
+```
+
+## 模型的batch_size, iteration, epics的参数
+
+```elixir
+input = Axon.input("data", shape: {nil,10})
+```
+
+<!-- livebook:{"output":true} -->
+
+```
+#Axon<
+  inputs: %{"data" => {nil, 10}}
+  outputs: "data"
+  nodes: 1
+>
+```
+
+The `nil` in `shape: {nil, 784}` in the line:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+Axon.input("input", shape: {nil, 784})
+```
+
+means that the **batch size is dynamic or unspecified**.
+
+### Here's why:
+
+* In machine learning, input tensors typically have shapes like `{batch_size, feature_size}`.
+* In this case, `784` is the number of features (e.g., flattened 28x28 image).
+* `nil` as the first value is a convention used in Axon (and many other ML frameworks like TensorFlow) to **allow the batch size to vary**.
+
+This means:
+
+* You can feed in a batch of size 1, 32, 128, etc., without having to recompile the model.
+* It makes the model definition more flexible and reusable.
+
+So `{nil, 784}` says: "Expect a 2D tensor with an arbitrary number of rows (examples) and 784 columns (features)."
+
+Let me know if you want an example with a concrete batch input!
+
+<!-- livebook:{"break_markdown":true} -->
+
+We feed a **batch** of input data (instead of one data point at a time) during training or inference for several important reasons:
+
+---
+
+### 🏎️ 1. **Efficiency with Vectorization**
+
+* Modern hardware like GPUs and TPUs are designed to process large matrices and tensors in parallel.
+* Batching lets us take advantage of this by doing many calculations at once.
+* Feeding one sample at a time underutilizes hardware—batching boosts speed significantly.
+
+---
+
+### 📈 2. **Stable Training via Gradient Averaging**
+
+* During training, the model updates weights based on gradients calculated from the loss.
+* A batch lets you **average the gradients** across multiple examples, leading to:
+  * More stable updates
+  * Better generalization
+  * Less noise in learning compared to single-sample updates
+
+---
+
+### 🧠 3. **Memory-Performance Tradeoff**
+
+* Large batches use more memory but train faster.
+* Small batches use less memory but may lead to noisier updates.
+* You can choose a batch size (e.g., 32, 64, 128) that balances speed and memory for your specific system.
+
+---
+
+### 📊 4. **Supports Parallelism in Data Pipelines**
+
+* Batching works well with data loading, augmentation, and prefetching.
+* It reduces the overhead of fetching/processing data point by point.
+
+---
+
+### Quick Analogy:
+
+Imagine if a teacher had to give feedback one student at a time, vs. a whole group at once. Giving group feedback is way more efficient—same idea with models and batches.
+
+---
+
+Want to see how batching affects training speed or accuracy in practice?
+
+<!-- livebook:{"break_markdown":true} -->
+
+Tuning batch size in practice is more art than science—but here’s a solid **step-by-step guide** to doing it effectively:
+
+---
+
+### 🧪 1. **Start with a Reasonable Default**
+
+* Common starting points: `32`, `64`, `128`
+* Pick one that fits in your GPU/CPU memory
+
+---
+
+### 🧠 2. **Monitor for These Key Effects**
+
+When you train your model, look at:
+
+* ✅ **Training loss**: Does it go down smoothly?
+* ✅ **Validation accuracy**: Does it improve and generalize?
+* ⚠️ **Overfitting**: Large batches might overfit faster
+* ⚠️ **Training instability**: Small batches can make loss fluctuate more
+
+---
+
+### 🛠️ 3. **Adjust Alongside Learning Rate**
+
+If you **increase batch size**, try increasing the **learning rate** too, often linearly.
+
+📌 Rule of thumb:  
+If you double the batch size, try doubling the learning rate.
+
+💡 This is called the **Linear Scaling Rule** (from the ResNet + ImageNet paper by Facebook/FAIR).
+
+---
+
+### 🧮 4. **Tune for Hardware**
+
+* If you're on a GPU, try the largest batch size that doesn't run out of memory.
+* On CPU? Smaller batches may be better due to limited parallelism.
+
+---
+
+### 🌀 5. **Try Gradient Accumulation (Optional)**
+
+If your model can’t fit a large batch in memory:
+
+* Simulate a large batch by **accumulating gradients** over multiple small batches before updating weights.
+
+---
+
+### ⚖️ 6. **Tradeoffs**
+
+| Batch Size          | Pros                                                | Cons                                      |
+| ------------------- | --------------------------------------------------- | ----------------------------------------- |
+| Small (8–32)      | Better generalization, noisy gradients help explore | Slower, unstable loss                     |
+| Medium (64–256)   | Good balance                                        | Might still overfit                       |
+| Large (512–2048+) | Fast, smooth updates                                | Needs tuning, risk of poor generalization |
+
+---
+
+### 🔍 Final Advice:
+
+1. **Grid search** or **manual trial** with sizes like 32, 64, 128, 256
+2. Track **val loss** and **generalization gap**
+3. Always pair with learning rate tuning
+
+---
+
+Want help plotting or comparing results across different batch sizes?
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Relations between iterations/batch/epics
+
+### 👇 Code:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+loop = Axon.Loop.trainer(model, :mean_squared_error, :sgd)
+Axon.Loop.run(loop, train_data, %{}, iterations: 1000)
+```
+
+---
+
+### 🌀 What does `iterations: 1000` mean?
+
+It tells Axon to run **1000 training steps** — where **each step is one model update** based on **one batch of data** from your `train_data`.
+
+---
+
+### 🔄 Relation Between **Iterations** and **Batch Size**
+
+* Each **iteration** processes **1 batch** from the dataset.
+* So if your `batch_size = 32`, then:
+  * One iteration = model sees 32 samples
+  * 1000 iterations = model sees 32,000 samples in total (32 × 1000)
+
+---
+
+### 🤔 Wait... What's the Epoch Then?
+
+* An **epoch** is **one full pass through your entire dataset**.
+* So if your dataset has 10,000 samples and your batch size is 32:
+  * It takes about `10,000 ÷ 32 ≈ 313` iterations to complete 1 epoch
+  * `1000 iterations ≈ 3.2 epochs`
+
+📝 That means `iterations` controls training length at a lower level than `epochs`.
+
+---
+
+### ✅ TL;DR:
+
+* `iterations: 1000` → train the model using **1000 batches**
+* **Batch size** = how many samples per iteration
+* So, `total samples seen = batch_size × iterations`
+
+---
+
+Want help switching from `iterations` to `epochs`, or figuring out how to choose both together?
+
+<!-- livebook:{"break_markdown":true} -->
+
+### What if iteration * batch_size > num_of_samples in each epic?
+
+---
+
+### 🧠 Given:
+
+* Dataset size = **10,000 samples**
+* Batch size = **32**
+* That means:
+  * **One epoch** = `10,000 ÷ 32 ≈ 313` iterations
+* But user runs:
+  ```elixir
+  Axon.Loop.run(loop, train_data, %{}, iterations: 500)
+  ```
+
+---
+
+### 🤔 So what happens?
+
+This means:
+
+* Axon will run **500 training steps**
+* But only **313 of them** complete one pass through the dataset
+* The remaining **187 iterations** will continue from the beginning of the dataset (it loops over it again)
+
+---
+
+### 🔁 Behind the scenes:
+
+Axon (like many ML frameworks) uses a **streaming data loader**, so:
+
+* After the dataset is exhausted (i.e., 313 batches), it **starts again from the top**.
+* This is effectively training for:
+  * `500 ÷ 313 ≈ 1.6 epochs`
+
+---
+
+### 📦 TL;DR:
+
+* **Yes, it’s totally fine to pass `iterations: 500`**, even if it's more than one epoch.
+* Axon will **automatically loop over the dataset** as needed.
+* You’re just training for more than 1 epoch (in this case, ~1.6).
+
+---
+
+Let me know if you want to switch this logic to `epochs:` instead, or dynamically calculate iterations for a specific number of epochs!
+
+<!-- livebook:{"break_markdown":true} -->
+
+### If the **input data is not a stream**, then training **will stop once the data is exhausted**, **even if you ask for more iterations**.
+
+---
+
+### 🔍 Why?
+
+Axon (like most Elixir-based tools) can train on:
+
+1. **Streams** (e.g., `Stream.cycle/1`, `Stream.map/2`)
+2. **Non-streams** (e.g., raw `Enum` like a list or tensor batch)
+
+With **non-stream data**:
+
+* Axon **doesn’t automatically restart the data**.
+* So if your dataset only has enough for 313 batches, and you pass `iterations: 500`:
+  * **Only 313 iterations will actually run**
+  * The remaining 187 iterations **won’t happen**, because there's no more data to fetch.
+
+---
+
+### 💡 Solution: Use a Stream
+
+To repeat data as needed, you can wrap your dataset in a stream. For example:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+Stream.cycle(train_data)
+```
+
+This makes your dataset **infinite**, so:
+
+* `iterations: 500` will always work
+* Axon keeps pulling new batches forever, or until iterations stop
+
+---
+
+### ⚠️ But be careful:
+
+If you use `Stream.cycle`, you must **manually control** how long training runs (e.g., with `iterations:` or `epochs:`), otherwise it will run forever.
+
+---
+
+### ✅ TL;DR:
+
+| Data Type      | Iterations > dataset? | Behavior                      |
+| -------------- | --------------------- | ----------------------------- |
+| **Stream**     | ✅                   | Dataset repeats automatically |
+| **Non-stream** | ❌                   | Training stops when data ends |
+
+---
+
+Want help turning your dataset into a stream or managing batches efficiently?
+
+<!-- livebook:{"break_markdown":true} -->
+
+### 🔁 Or Just Use `epochs:`
+
+If your data is **streamable**, and you're using `Axon.Loop.run/4`, you can just write:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+Axon.Loop.run(loop, train_data, %{}, epochs: 5)
+```
+
+This handles the iteration calculation for you behind the scenes — much cleaner and preferred if possible.
+
+---
+
+### ✅ TL;DR:
+
+| Want to run for N epochs? | Best Approach                                                                                 |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| Data is streamable        | Use `epochs: N` directly ✅                                                                  |
+| Data is not stream        | Calculate `iterations = epochs * (dataset_size / batch_size)` and pass `iterations:` manually |
+
+## 模型显示
+
+```elixir
+model =
+  Axon.input("data")
+  |> Axon.dense(32)
+  |> Axon.activation(:relu)
+  |> Axon.dropout(rate: 0.5)
+  |> Axon.dense(1)
+  |> Axon.activation(:softmax)
+template = Nx.template({2, 16}, :f32)
+Axon.Display.as_graph(model, template)
+```
+
+In the Axon model graph, the suffixes like `_0`, `_1` (e.g., `dense_0`, `relu_0`, `dense_1`) are **automatically assigned layer names** that help distinguish multiple layers of the same type.
+
+---
+
+### 📌 Why Axon adds suffixes:
+
+When you define layers like this:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+Axon.input("data")
+|> Axon.dense(32)
+|> Axon.activation(:relu)
+|> Axon.dropout(rate: 0.5)
+|> Axon.dense(1)
+|> Axon.activation(:softmax)
+```
+
+You're adding:
+
+* 2 dense layers
+* 2 activations
+* 1 dropout layer
+
+So Axon:
+
+* Names them `dense_0` and `dense_1`
+* Names the activations `relu_0` and `softmax_0`
+
+---
+
+### 🔢 What the numbers mean:
+
+* The number represents the **position/order** of that layer type in your model.
+* It’s especially useful when debugging or analyzing the graph.
+
+For example:
+
+* `dense_0`: the **first** dense layer
+* `dense_1`: the **second** dense layer
+* `relu_0`: the first (and only) ReLU activation
+* `softmax_0`: the softmax activation
+
+---
+
+### ✅ TL;DR:
+
+* The `_0`, `_1` suffixes help uniquely identify layers of the **same type**.
+* It’s automatic and used for visualization and internal tracking — you don’t need to manage it manually.
+
+## 自定义层
+
+Creating a **custom layer** in Axon is useful when built-in layers don’t provide the functionality or behavior you need. A custom layer gives you full control over the computation — essential for novel research, experimenting with new techniques, or integrating non-standard logic into a model.
+
+---
+
+### 🎯 **Real-World Use Case: Adaptive Gaussian Noise Layer**
+
+Let’s say you’re working on a **robust image classification model** and want to **add adaptive Gaussian noise during training** to improve generalization. Axon doesn’t include a built-in layer for this, so you'd implement it yourself.
+
+#### 🔍 What it does:
+
+* Adds Gaussian noise with a learnable or input-dependent standard deviation.
+* Applies only during training (skipped in inference).
+
+---
+
+### 🧱 Custom Layer Example in Axon
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+defmodule CustomLayers do
+  import Nx.Defn
+
+  defn adaptive_noise(input, opts \\ []) do
+    opts = keyword!(opts, mode: :train, std: 0.1)
+
+    if opts[:mode] == :train do
+      noise = Nx.random_normal(Nx.shape(input), 0.0, opts[:std], type: Nx.type(input))
+      input + noise
+    else
+      input
+    end
+  end
+end
+```
+
+### 👇 Use in a model:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+input = Axon.input("img", shape: {nil, 3, 32, 32})
+out =
+  input
+  |> Axon.layer(&CustomLayers.adaptive_noise/2, op_name: :adaptive_noise)
+  |> Axon.conv(32, kernel_size: {3, 3})
+  |> Axon.relu()
+  |> Axon.flatten()
+  |> Axon.dense(10, activation: :softmax)
+```
+
+---
+
+### ✅ Why custom layer here?
+
+* **Not supported out of the box**.
+* **Training-specific behavior**: different outputs during training and inference.
+* **Easy to reuse or tweak**: You can change the standard deviation or make it learnable.
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Use Axon’s custom layer system to reimplement a common built-in layer like `Axon.dense/3` from scratch using `Axon.layer/3`.
+
+---
+
+### 🎯 What does `Axon.dense/3` do?
+
+It computes:
+
+```
+output = input • weights + bias
+```
+
+Where:
+
+* `input` has shape `{batch, input_features}`
+* `weights` has shape `{input_features, output_features}`
+* `bias` has shape `{output_features}`
+
+---
+
+### ✅ Step 1: Define the `defn` function for computation
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+defmodule CustomLayers do
+  import Nx.Defn
+
+  defn dense(input, weights, bias, _opts \\ []) do
+    Nx.dot(input, weights) + bias
+  end
+end
+```
+
+---
+
+### ✅ Step 2: Define a custom layer that uses this function
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+defmodule MyModel do
+  import Axon
+
+  def dense_layer(input, output_features, name \\ "dense") do
+    input_shape = Axon.shape(input)
+    input_features = List.last(input_shape)
+
+    # Trainable parameters
+    w = Axon.param("#{name}_weights", fn _ -> Nx.random_uniform({input_features, output_features}) end)
+    b = Axon.param("#{name}_bias", fn _ -> Nx.broadcast(0.0, {output_features}) end)
+
+    # Custom layer using parameters
+    Axon.layer(&CustomLayers.dense/3, [input, w, b], name: name, op_name: :dense_custom)
+  end
+end
+```
+
+---
+
+### ✅ Step 3: Use it in a model
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+input = Axon.input("features", shape: {nil, 8})
+
+model =
+  input
+  |> MyModel.dense_layer(16, "custom_dense_1")
+  |> Axon.relu()
+  |> MyModel.dense_layer(10, "custom_dense_2")
+  |> Axon.softmax()
+```
+
+---
+
+### 💡 Benefits of doing this:
+
+* Learn how built-in Axon layers work under the hood.
+* Gain control to tweak behaviors — e.g., use a different initialization, no bias, or fused activation.
+* Set up the foundation to build more advanced layers (e.g., attention, gating, etc.)
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Why defn is a must for training process?
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+defn dense(input, weights, bias, _opts \\ []) do
+  Nx.dot(input, weights) + bias
+end
+```
+
+At first glance, it feels like overkill to wrap this in `defn`, right? But there are **real advantages** to using `defn` in Axon and Nx, even for one-liners.
+
+---
+
+### 🚀 1. **Just-in-Time (JIT) Compilation & Optimization**
+
+`defn` functions are compiled by Nx into highly efficient native code (via EXLA, Torchx, etc.). That gives you:
+
+* **Speed**: They’re JIT-compiled, meaning they run close to native performance.
+* **Auto-batching**: Can be optimized for running on GPUs or TPUs.
+* **Graph Building**: They are turned into static computation graphs, ideal for training/inference.
+
+Compare that to regular Elixir functions, which are interpreted and not optimized for tensor computation.
+
+---
+
+### 🛠️ 2. **Automatic Differentiation**
+
+Only `defn` functions can be differentiated by Nx, which is essential for training.
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+grad = Nx.Defn.grad(&CustomLayers.dense/3)
+```
+
+So even if it’s one line, you get gradients **for free**.
+
+---
+
+### 📦 3. **Future Extensibility**
+
+Even if it’s just one line now, it gives you space to:
+
+* Add support for dropout during training
+* Implement layer normalization or custom activations
+* Debug/trace intermediate steps with `IO.inspect` or logging
+
+---
+
+### 🤓 TL;DR
+
+> Even a one-liner `defn` like this is powerful because:
+> 
+> ✅ It compiles to fast native code  
+> ✅ It supports autodiff for training  
+> ✅ It integrates into Axon's computation graph  
+> ✅ It future-proofs the layer for more complexity
+
+---
+
+Would you like to see what happens if you *don't* use `defn`, or how to trace intermediate tensor values during execution?
